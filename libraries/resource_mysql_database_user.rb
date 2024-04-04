@@ -26,6 +26,7 @@ class Chef
         super
         @resource_name = :mysql_database_user
         @provider = Chef::Provider::Database::MysqlUser
+        @use_native_auth = true
       end
 
       def password(arg = nil)
@@ -33,6 +34,14 @@ class Chef
           :password,
           arg,
           kind_of: [String, HashedPassword]
+        )
+      end
+
+      def use_native_auth(arg = nil)
+        set_or_return(
+          :use_native_auth,
+          arg,
+          kind_of: [TrueClass, FalseClass]
         )
       end
     end

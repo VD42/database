@@ -49,18 +49,16 @@ class Chef
             converge_by "Creating user '#{new_resource.username}'@'#{new_resource.host}'" do
               begin
                 repair_sql = "CREATE USER '#{new_resource.username}'@'#{new_resource.host}'"
-                if new_resource.password
-                  repair_sql += ' IDENTIFIED BY '
-                  repair_sql += if new_resource.password.is_a?(HashedPassword)
-                                  " PASSWORD '#{new_resource.password}'"
-                                else
-                                  " '#{new_resource.password}'"
-                                end
+                unless database_has_password_column(test_client)
+                  repair_sql << ' REQUIRE SSL' if new_resource.require_ssl
+                  repair_sql << ' REQUIRE X509' if new_resource.require_x509
                 end
                 repair_client.query(repair_sql)
               ensure
                 close_repair_client
               end
+              update_user_password if new_resource.password
+              password_up_to_date = true
             end
           end
 
@@ -135,16 +133,16 @@ class Chef
           if incorrect_privs
             converge_by "Granting privs for '#{new_resource.username}'@'#{new_resource.host}'" do
               begin
-                repair_sql = "GRANT #{new_resource.privileges.join(',')}"
+                formatted_privileges = new_resource.privileges.map do |p|
+                  p.to_s.upcase.tr('_', ' ').gsub('REPL ', 'REPLICATION ').gsub('CREATE TMP TABLE', 'CREATE TEMPORARY TABLES').gsub('SHOW DB', 'SHOW DATABASES')
+                end
+                repair_sql = "GRANT #{formatted_privileges.join(',')}"
                 repair_sql += " ON #{db_name}.#{tbl_name}"
-                repair_sql += " TO '#{new_resource.username}'@'#{new_resource.host}' IDENTIFIED BY"
-                repair_sql += if new_resource.password.is_a?(HashedPassword)
-                                " PASSWORD '#{new_resource.password}'"
-                              else
-                                " '#{new_resource.password}'"
-                              end
-                repair_sql += ' REQUIRE SSL' if new_resource.require_ssl
-                repair_sql += ' REQUIRE X509' if new_resource.require_x509
+                repair_sql += " TO '#{new_resource.username}'@'#{new_resource.host}'"
+                if database_has_password_column(test_client)
+                  repair_sql += ' REQUIRE SSL' if new_resource.require_ssl
+                  repair_sql += ' REQUIRE X509' if new_resource.require_x509
+                end
                 repair_sql += ' WITH GRANT OPTION' if new_resource.grant_option
 
                 redacted_sql = redact_password(repair_sql, new_resource.password)
@@ -335,7 +333,7 @@ class Chef
             test_sql += if new_resource.password.is_a? HashedPassword
                           "AND authentication_string='#{new_resource.password}'"
                         else
-                          "AND authentication_string=PASSWORD('#{new_resource.password}')"
+                          "AND authentication_string=CONCAT('*', UPPER(SHA1(UNHEX(SHA1('#{new_resource.password}')))))"
                         end
           end
           test_client.query(test_sql).size > 0
@@ -357,6 +355,8 @@ class Chef
                 repair_sql = "ALTER USER '#{new_resource.username}'@'#{new_resource.host}' "
                 repair_sql += if new_resource.password.is_a? HashedPassword
                                 "IDENTIFIED WITH mysql_native_password AS '#{new_resource.password}'"
+                              elsif new_resource.use_native_auth
+                                "IDENTIFIED WITH mysql_native_password BY '#{new_resource.password}'"
                               else
                                 "IDENTIFIED BY '#{new_resource.password}'"
                               end
