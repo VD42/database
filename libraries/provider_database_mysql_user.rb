@@ -49,7 +49,7 @@ class Chef
             converge_by "Creating user '#{new_resource.username}'@'#{new_resource.host}'" do
               begin
                 repair_sql = "CREATE USER '#{new_resource.username}'@'#{new_resource.host}'"
-                unless database_has_password_column(test_client)
+                unless database_has_password_column(repair_client)
                   repair_sql << ' REQUIRE SSL' if new_resource.require_ssl
                   repair_sql << ' REQUIRE X509' if new_resource.require_x509
                 end
@@ -139,7 +139,7 @@ class Chef
                 repair_sql = "GRANT #{formatted_privileges.join(',')}"
                 repair_sql += " ON #{db_name}.#{tbl_name}"
                 repair_sql += " TO '#{new_resource.username}'@'#{new_resource.host}'"
-                if database_has_password_column(test_client)
+                if database_has_password_column(repair_client)
                   repair_sql += ' REQUIRE SSL' if new_resource.require_ssl
                   repair_sql += ' REQUIRE X509' if new_resource.require_x509
                 end
@@ -283,6 +283,7 @@ class Chef
 
         def close_test_client
           @test_client.close if @test_client
+          @test_client = nil
         rescue Mysql2::Error
           @test_client = nil
         end
@@ -303,6 +304,7 @@ class Chef
 
         def close_repair_client
           @repair_client.close if @repair_client
+          @repair_client = nil
         rescue Mysql2::Error
           @repair_client = nil
         end
